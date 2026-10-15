@@ -41,13 +41,17 @@ Work out, before changing anything:
 
 ### 2. Add the loader from `main`
 
-Download the newest loader into the project, next to the server entry point (or in a `lib/` folder the project already uses):
+Do this before touching the project's code, so you never leave a server that `require`s a file that isn't there. Download the newest loader next to the server entry point (or into a `lib/` folder the project already uses):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/carnold713/review-comments/main/index.js -o review-comments.js
 ```
 
-If you cannot download it, copy `index.js` from a clone of the repository. Do not hand-type it. Also skim `https://raw.githubusercontent.com/carnold713/review-comments/main/README.md`: the README on `main` is the source of truth for options, and it may have changed since this skill was written. Where they disagree, follow the README.
+Also read `https://raw.githubusercontent.com/carnold713/review-comments/main/README.md` if you can: the README on `main` is the source of truth and may be newer than this skill. Where they disagree, follow the README.
+
+**If the download is blocked** (no network, or the session's permission rules refuse to fetch code from outside), don't try other ways around the block and don't type the file from memory. Stop here and tell the user: what you were about to do, the exact `curl` command above for them to run in the project folder (or to allow in their Claude permission settings), and that you'll continue once `review-comments.js` is there. You may describe the remaining steps, but don't edit the server or commit anything until the loader exists.
+
+Only copy the loader from a local clone if the user points you to one; then take it from `main` as it is on GitHub, not from whatever is checked out: `git -C <clone> fetch origin main && git -C <clone> show origin/main:index.js > review-comments.js`.
 
 Installing the package instead (`npm install github:carnold713/review-comments`) also works and bundles a starting copy of the API and widget, but npm pins the loader to a commit in the lockfile. Prefer the copied file unless the project already installs it this way.
 
@@ -78,7 +82,18 @@ Then two things:
 
 **Page keys are part of the database.** Comments are stored per `page` key, so keys must stay stable for the life of the project. Use short route-based keys (`home`, `pricing`, `product-detail`), not titles, build hashes or anything that changes. A single-page app can use one key for the whole app (each comment still remembers its exact URL and replays it), or one key per major route if every route is a full page load. When you update an existing project, keep the keys it already uses.
 
-Optional page settings (`font`, `accent`, `avoid`, `targets`, `breakpoints`) and the state adapter for apps that keep state in JavaScript are described in the README. Add an adapter when the page has tabs, filters, drawers or a selected item that matter for understanding a comment.
+Optional page settings go in the same object as `page` and `label` (`inject`/`tag` options, or `window.__COMMENTS`):
+
+| Option | Example | What it does |
+|---|---|---|
+| `avoid` | `'.chat-launcher, footer.sticky'` or an array of selectors | The comment button moves up to stay clear of these when they sit in the bottom-right corner. Marking an element with the bare attribute `data-rc-avoid` does the same. |
+| `targets` | `'.card, .row'` | Extra elements that count as "what was clicked". Any element with `data-rc-label="…"` is used too. |
+| `font` | `"'Lutron Sans', Arial, sans-serif"` | Font for the widget. |
+| `accent`, `pinColor` | `'#006dcc'`, `'#e8590c'` | Button and marker colours. |
+| `breakpoints` | `[[768, 'Mobile'], [1024, 'Tablet'], [1440, 'Desktop Narrow']]` | How screen widths are named; wider is "Desktop". |
+| `enabled` | `false` | Turns the widget off on that page. |
+
+Apps that keep state in JavaScript (tabs, filters, a drawer, a selected item) should get an adapter so replays reopen that state: `window.__rcAdapter = {snapshot: () => ({...state, context: 'Drawer open'}), restore: async s => {/* close everything, set state, render, scroll, open panels, wait for animations */}, details: s => [['Tab', s.tab]]}`. Keep snapshots small (under 32 KB) and make `restore` ignore fields it doesn't know, because old comments keep old snapshots. The README has the full contract.
 
 ### 4. Make the comments database persistent
 
@@ -98,15 +113,23 @@ Things that break persistence and must be avoided: `dataDir` inside the app's bu
 
 ### 5. Set the delete password
 
-The API refuses to start without one, and `/__rc/...` then answers 503. Generate a random one per project (for example `openssl rand -base64 18`), set it as `RC_DELETE_PASSWORD` in the host's environment variables and in the local `.env` if the project uses one (never commit it), and give it to the user in your final message so they can delete comments.
+The API refuses to start without one, and every `/__rc/...` route then answers 503, including the widget script, so the comment button silently doesn't appear. Generate a random one per project (for example `openssl rand -base64 18`) and set it as `RC_DELETE_PASSWORD` in the host's environment variables. Locally, use the project's existing `.env` if it already loads one (and make sure `.env` is git-ignored); otherwise just pass it on the command line (`RC_DELETE_PASSWORD=… npm start`). Don't create a `.env` the app never reads, and don't add dotenv just for this. Give the password to the user in your final message so they can delete comments.
 
 ### 6. Check it works
 
-Run the project locally (or against the deployed URL) and check:
+Run the project locally (or check the deployed URL) with a throwaway local `dataDir`, then:
 
-1. `GET /__rc/version` returns JSON with `"source": "github"` and `"ref": "main"`, a `version`/`widget` matching the latest on `main`, and a recent `checked` time (the first check happens at startup; if `checked` is null the server could not reach GitHub, which is fine locally but must work in production).
-2. The page shows the round comment button in the bottom-right corner, and it is not covering a sticky footer or chat button (use the `avoid` option or `data-rc-avoid` if it is).
-3. Posting a comment creates `<dataDir>/comments.json`, and the comment is still there after restarting the server. Delete your test comment afterwards (viewer → Delete, using the password), or with `curl -X DELETE -H "X-Delete-Password: …" <site>/__rc/api/comments/<id>`.
+1. `curl -s localhost:<port>/__rc/version` returns JSON with `"source": "github"`, `"ref": "main"`, a `version`/`widget` matching the latest on `main`, and a recent `checked` time.
+2. The page HTML contains the two script tags (`window.__COMMENTS` and `/__rc/rc.js`), `/__rc/rc.js` answers 200, and in a browser the round comment button is in the bottom-right corner, clear of sticky footers and chat buttons (fix with `avoid` or `data-rc-avoid`).
+3. Post a test comment, restart the server, and check it is still there and that `<dataDir>/comments.json` exists:
+   ```bash
+   curl -s -X POST localhost:<port>/__rc/api/comments -H 'Content-Type: application/json' \
+     -d '{"page":"home","author":"Setup check","text":"Test comment","pin":{"x":10,"y":10},"snap":{}}'
+   curl -s 'localhost:<port>/__rc/api/comments?page=home'
+   ```
+   Then delete it: `curl -s -X DELETE -H "X-Delete-Password: <password>" localhost:<port>/__rc/api/comments/<id>`.
+
+Without access to GitHub (an offline sandbox), a fresh install has no API or widget code yet, so `/__rc/...` answers 503 and checks 1–3 can't pass locally. Then check what you can (the server starts, pages render with the script tags, the loader logs `update check failed`), and say clearly that the live check has to happen on the deployed site after the first deploy.
 
 If the project has tests or a build, run them.
 

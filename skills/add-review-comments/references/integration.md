@@ -1,6 +1,6 @@
 # Wiring the loader into different servers
 
-All of these assume `const comments = reviewComments({...})` from SKILL.md step 3. Two rules apply everywhere:
+All of these assume `const comments = reviewComments({...})` from SKILL.md step 3. To put the widget on a page, use `comments.inject(html, {page, label})` on server-rendered HTML, or `comments.tag({page, label})`, which returns the two script tags as a string for templates. Two rules apply everywhere:
 
 - `/__rc/...` must reach `comments.handle(req, res)` with the **raw Node request and response**, **before** any body parser has read the body.
 - The pages and `/__rc/...` must be served from the **same origin** (same protocol, host and port). Replay loads the page in a same-origin iframe, and the API is called with same-origin credentials.
