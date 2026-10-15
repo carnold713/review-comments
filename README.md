@@ -142,6 +142,10 @@ Pages that already define `window.__proto = {snapshot, restore}` (the original p
 - **Read:** the list has **Open** and **Resolved** tabs. Each comment shows the screen size, what was showing, and the reply count.
 - **Replay:** click a comment. The page loads in a frame at the commenter's size (scaled to fit), restored to their state, with their marker. ← → step through comments, Esc closes.
 - **Reply, Resolve / Reopen, Delete** from the viewer. Delete asks for the delete password.
+- **Copy for Claude:** in the viewer, click **Copy for Claude** (or press C). You get one image on the clipboard: what the commenter saw, with their marker, and underneath it the comment, the page address, screen size, what was clicked, and the replies. Paste it into Claude (or Claude Code) and ask it to make the change. **Save as JPG** downloads the same image.
+  - The first time, the browser asks to capture the tab: choose **This tab** and allow it. The capture stays on while the viewer is open, so the next comments copy straight away; closing the viewer stops it.
+  - The clipboard always holds a PNG (browsers do not allow JPG there); use **Save as JPG** when you want the file.
+  - Phones and browsers without screen capture copy the comment card without the screenshot.
 
 Anyone with the link can post. Deleting needs the password.
 

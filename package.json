@@ -1,6 +1,6 @@
 {
   "name": "review-comments",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Comment on live sites and replay exactly what the commenter saw: screen size, scroll, open panels and app state. Drop into any Node server.",
   "main": "index.js",
   "files": ["index.js", "server/", "client/", "README.md", "docs/", "LICENSE"],

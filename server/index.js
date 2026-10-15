@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const VERSION = '1.0.1';
+const VERSION = '1.1.0';
 
 module.exports = function createReviewComments(opts = {}, host = {}) {
   const base = '/' + String(opts.base || '/__rc').replace(/^\/+|\/+$/g, '');
