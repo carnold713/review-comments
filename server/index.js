@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 
 module.exports = function createReviewComments(opts = {}, host = {}) {
   const base = '/' + String(opts.base || '/__rc').replace(/^\/+|\/+$/g, '');
@@ -126,7 +126,7 @@ module.exports = function createReviewComments(opts = {}, host = {}) {
     if (p !== base && !p.startsWith(base + '/')) return false;
     const rest = p.slice(base.length) || '/';
     if (rest === '/rc.js' && (req.method === 'GET' || req.method === 'HEAD')) serveClient(req, res);
-    else if (rest === '/version') json(res, 200, {version: VERSION, ...(host.info ? host.info() : {})});
+    else if (rest === '/version') json(res, 200, {version: VERSION, widget: (/const VERSION = '([^']+)'/.exec(clientText() || '') || [])[1] || null, ...(host.info ? host.info() : {})});
     else if (rest === '/api/comments' || rest.startsWith('/api/comments/')) api(req, res, rest.slice('/api/comments'.length)).catch(() => { if (!res.headersSent) json(res, 500, {error: 'server error'}); });
     else json(res, 404, {error: 'not found'});
     return true;

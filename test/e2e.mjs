@@ -24,7 +24,7 @@ try {
 
   console.log('widget and API');
   const js = await fetch(B + '/__rc/rc.js'); check(js.ok && (await js.text()).includes('ReviewComments'), 'serves /__rc/rc.js');
-  check((await j('/__rc/version')).body?.version === '1.0.0', 'reports its version');
+  check((await j('/__rc/version')).body?.version === '1.0.1', 'reports its version');
   check((await j('/__rc/api/comments', {method: 'POST', body: '{}'})).status === 400, 'rejects an empty comment');
 
   console.log('add a comment through the UI (page with no adapter)');

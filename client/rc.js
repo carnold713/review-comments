@@ -8,7 +8,7 @@
    Without one, scroll positions, open <details> and open <dialog> elements are saved and restored. */
 (() => {
   if (window.ReviewComments?.loaded) return;
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const script = document.currentScript;
   const DS = script?.dataset || {};
   const CFG = Object.assign({}, window.__COMMENTS || {}, window.ReviewCommentsConfig || {});
