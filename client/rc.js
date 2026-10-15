@@ -8,7 +8,7 @@
    Without one, scroll positions, open <details> and open <dialog> elements are saved and restored. */
 (() => {
   if (window.ReviewComments?.loaded) return;
-  const VERSION = '1.0.1';
+  const VERSION = '1.1.0';
   const script = document.currentScript;
   const DS = script?.dataset || {};
   const CFG = Object.assign({}, window.__COMMENTS || {}, window.ReviewCommentsConfig || {});
@@ -227,6 +227,12 @@
   .rc-ib:disabled{opacity:.3;cursor:default}
   .rc-tb{height:32px;padding:0 12px!important;border-radius:16px;border:1px solid #555!important;color:#fff!important;font-weight:600!important;font-size:13px!important;flex:none}
   .rc-tb:hover{background:#333}
+  .rc-tb.go{background:${ACCENT}!important;border-color:${ACCENT}!important}
+  .rc-tb.go:hover{filter:brightness(.92)}
+  .rc-tb:disabled{opacity:.5;cursor:default}
+  .rc-vacts{display:flex;flex-wrap:wrap;gap:8px}
+  .rc-capturing .rc-vbar,.rc-capturing .rc-vside,.rc-capturing .rc-cap{display:none!important}
+  .rc-capturing .rc-frame{box-shadow:none;border-radius:0}
   .rc-vmain{flex:1;min-height:0;display:flex}
   .rc-stage{flex:1;min-width:0;position:relative;overflow:hidden}
   .rc-frame{position:absolute;background:#fff;box-shadow:0 0 0 1px #444,0 24px 64px rgba(0,0,0,.6);overflow:hidden;border-radius:4px}
@@ -443,6 +449,7 @@
         <button class="rc-ib" data-v="prev" aria-label="Previous comment" ${i <= 0 ? 'disabled' : ''}>${I.l}</button>
         <button class="rc-ib" data-v="next" aria-label="Next comment" ${i >= order.length - 1 ? 'disabled' : ''}>${I.r}</button>
         <span class="rc-vt">#${c.n} · ${esc(c.author)} · ${ago(c.created)}</span>
+        <button class="rc-tb go" data-v="claude" title="Copy one image of what they saw and what they wrote, ready to paste into Claude (C)">Copy for Claude</button>
         <button class="rc-tb" data-v="resolve">${c.resolved ? 'Reopen' : 'Resolve'}</button>
         <button class="rc-tb hide-s" data-v="delete">Delete</button>
         <button class="rc-ib" data-v="close" aria-label="Close">${I.x}</button>
@@ -460,17 +467,18 @@
           </dl>
           ${c.replies.map(r => `<div class="rc-rep"><b>${esc(r.author)}</b> <span class="rc-meta">${ago(r.created)}</span><div class="rc-body" style="font-size:14px;line-height:20px">${esc(r.text)}</div></div>`).join('')}
           <form class="rc-reply">${me() ? '' : '<input name="author" placeholder="Your name" maxlength="60">'}<textarea name="text" rows="2" placeholder="Reply…" maxlength="2000"></textarea><div class="rc-btns"><button class="rc-b pri">Reply</button></div></form>
-          <button class="rc-tb" data-v="delete" style="align-self:flex-start">Delete comment</button>
+          <div class="rc-vacts"><button class="rc-tb" data-v="save" title="Download the same image as a JPG">Save as JPG</button><button class="rc-tb" data-v="delete">Delete comment</button></div>
         </aside>
       </div>`;
     const frame = $('.rc-frame', v), ifr = $('iframe', v), stage = $('.rc-stage', v), cap = $('.rc-cap', v);
     ifr.src = replaySrc(c);
     const fit = () => {
-      const W = stage.clientWidth - 32, H = stage.clientHeight - 48, w = s.vw || 1440, h = s.vh || 900;
+      const full = v.classList.contains('rc-capturing');      // Copy for Claude: no margins, nothing else on screen
+      const W = stage.clientWidth - (full ? 0 : 32), H = stage.clientHeight - (full ? 0 : 48), w = s.vw || 1440, h = s.vh || 900;
       const k = Math.min(1, W / w, H / h);
       ifr.style.width = w + 'px'; ifr.style.height = h + 'px'; ifr.style.transform = `scale(${k})`;
       frame.style.width = w * k + 'px'; frame.style.height = h * k + 'px';
-      frame.style.left = (stage.clientWidth - w * k) / 2 + 'px'; frame.style.top = Math.max(8, (stage.clientHeight - 24 - h * k) / 2) + 'px';
+      frame.style.left = (stage.clientWidth - w * k) / 2 + 'px'; frame.style.top = (full ? (stage.clientHeight - h * k) / 2 : Math.max(8, (stage.clientHeight - 24 - h * k) / 2)) + 'px';
       cap.textContent = `${w} × ${h}` + (k < 1 ? ` · shown at ${Math.round(k * 100)}%` : ' · actual size');
     };
     fit(); v._fit = fit;
@@ -511,7 +519,144 @@
       }
     });
   }
-  function closeViewer() { $('.rc-viewer', root)?.remove(); viewing = null; fab.hidden = false; load(); }
+  /* ---------- Copy for Claude: one image with what the commenter saw and what they wrote ----------
+     A page can only take a real screenshot of itself through screen capture, which asks for permission. The capture is
+     kept while the viewer is open, so only the first copy asks; closing the viewer stops it. The image is the replay
+     frame (marker included) with the comment and its details drawn underneath, or beside it for phone-shaped screens. */
+  let tabCap = null;
+  const stopCapture = () => { tabCap?.stream.getTracks().forEach(t => t.stop()); tabCap = null; };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function captureFrame() {
+    if (!navigator.mediaDevices?.getDisplayMedia) return null;      // phones and older browsers: text only
+    let fresh = false;
+    if (!tabCap || tabCap.stream.getVideoTracks()[0]?.readyState !== 'live') {
+      // called before any await, so it still counts as part of the click
+      const stream = await navigator.mediaDevices.getDisplayMedia({video: {displaySurface: 'browser', width: {ideal: Math.round(innerWidth * devicePixelRatio)}, height: {ideal: Math.round(innerHeight * devicePixelRatio)}}, audio: false, preferCurrentTab: true, selfBrowserSurface: 'include', surfaceSwitching: 'exclude', monitorTypeSurfaces: 'exclude'});
+      const video = document.createElement('video'); video.muted = true; video.playsInline = true; video.srcObject = stream;
+      stream.getVideoTracks()[0].addEventListener('ended', () => { if (tabCap?.stream === stream) tabCap = null; });
+      tabCap = {stream, video}; fresh = true;
+      await video.play();
+    }
+    for (let i = 0; i < 100 && $('.rc-load', root); i++) await sleep(100);   // still restoring their view
+    root.querySelectorAll('.rc-toast').forEach(t => t.remove());
+    const vw = $('.rc-viewer', root), frame = $('.rc-frame', root);
+    if (!vw || !frame) return null;
+    // for a moment, show the replay alone and as large as the window allows, so the picture is as sharp as possible
+    vw.classList.add('rc-capturing'); vw._fit?.();
+    try {
+      await sleep(fresh ? 700 : 200);       // the first time, also let the browser's "sharing this tab" bar settle the layout
+      const v = tabCap.video;
+      await Promise.race([new Promise(r => v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => r()) : r()), sleep(300)]);
+      const r = frame.getBoundingClientRect(), k = v.videoWidth / innerWidth;
+      // a different tab or window was picked: its picture does not match this viewport
+      if (!v.videoWidth || Math.abs(v.videoHeight / k - innerHeight) > 40) { stopCapture(); throw Object.assign(new Error('wrong surface'), {wrongSurface: true}); }
+      const cv = document.createElement('canvas'); cv.width = Math.round(r.width * k); cv.height = Math.round(r.height * k);
+      cv.getContext('2d').drawImage(v, r.left * k, r.top * k, r.width * k, r.height * k, 0, 0, cv.width, cv.height);
+      return cv;
+    } finally { vw.classList.remove('rc-capturing'); vw._fit?.(); }
+  }
+  const wrap = (ctx, text, max) => {
+    const out = [];
+    for (const para of String(text || '').split('\n')) {
+      let line = '';
+      for (const word of para.split(' ')) {
+        const next = line ? line + ' ' + word : word;
+        if (ctx.measureText(next).width <= max) { line = next; continue; }
+        if (line) out.push(line);
+        line = word;
+        while (line.length > 1 && ctx.measureText(line).width > max) {    // a word wider than the line
+          let i = line.length - 1; while (i > 1 && ctx.measureText(line.slice(0, i)).width > max) i--;
+          out.push(line.slice(0, i)); line = line.slice(i);
+        }
+      }
+      out.push(line);
+    }
+    return out;
+  };
+  function feedbackImage(c, shot) {
+    const s = c.snap || {}, D = 2, PAD = 24 * D;          // drawn at 2× so the text stays sharp
+    const F = (w, px) => `${w} ${px * D}px ${FONT}`;
+    let sw = 0, sh = 0;
+    if (shot) { const f = Math.min(1, 1600 / shot.width, 1400 / shot.height); sw = Math.round(shot.width * f); sh = Math.round(shot.height * f); }
+    const side = shot && sh > sw;                          // phone-shaped screenshot: text beside it
+    const W = side ? sw + 400 * D : Math.max(sw, 720 * D), TW = (side ? 400 * D : W) - 2 * PAD;
+    const rows = [['Page', LABEL], ['Address', new URL(s.url || location.pathname, location.href).href], ['Screen', device(s)], ['Showing', s.context || 'Page']];
+    if (c.area) rows.push(['Marked', `An area, ${c.area.w} × ${c.area.h}${shot ? ' (outlined)' : ''}`]); else if (c.target) rows.push(['Clicked on', c.target]);
+    detailRows(s).forEach(row => { if (row[0] !== 'Address') rows.push(row); });
+    rows.push(['Posted', `${c.author} · ${new Date(c.created).toLocaleString()}`], ['Status', c.resolved ? 'Resolved' : 'Open']);
+    // lay the text out once to measure it, then draw it
+    const ctx = document.createElement('canvas').getContext('2d'), items = [];
+    const add = (font, color, text, lh, width = TW, x = 0, after = 0) => { ctx.font = font; const lines = wrap(ctx, text, width); items.push({font, color, lines, lh: lh * D, x, after: after * D}); };
+    const LW = 92 * D;
+    add(F(700, 18), '#262626', `Comment #${c.n}`, 26, TW - 40 * D, 40 * D, 10);
+    add(F(400, 17), '#262626', c.text, 26, TW, 0, 14);
+    rows.forEach(([key, val], i) => {
+      ctx.font = F(400, 13); const lines = wrap(ctx, String(val ?? ''), TW - LW);
+      items.push({font: F(400, 13), color: '#262626', lines, lh: 20 * D, x: LW, after: (i === rows.length - 1 ? 12 : 2) * D, key});
+    });
+    if (c.replies?.length) {
+      add(F(700, 13), '#262626', `Replies (${c.replies.length})`, 20, TW, 0, 4);
+      c.replies.forEach(rp => add(F(400, 13), '#262626', `${rp.author}: ${rp.text}`, 20, TW, 0, 6));
+    }
+    if (shot) add(F(400, 12), '#666666', c.area ? 'The outlined area in the screenshot is what the comment is about.' : 'The numbered marker in the screenshot is where the comment was placed.', 18, TW, 0, 0);
+    else add(F(400, 12), '#666666', 'No screenshot: this browser cannot capture the page.', 18, TW, 0, 0);
+    const textH = items.reduce((h, it) => h + it.lines.length * it.lh + it.after, 0) + 2 * PAD;
+    const H = side ? Math.max(sh, textH) : sh + textH;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+    if (shot) {
+      g.fillStyle = '#f8f8f8'; g.fillRect(0, 0, side ? sw : W, side ? H : sh);
+      g.drawImage(shot, side ? 0 : Math.round((W - sw) / 2), 0, sw, sh);
+      g.fillStyle = '#e9e9e9'; side ? g.fillRect(sw, 0, D, H) : g.fillRect(0, sh, W, D);
+    }
+    const ox = (side ? sw : 0) + PAD; let y = (side ? 0 : sh) + PAD;
+    // the same numbered marker as on the page, so the text and the screenshot are clearly linked
+    const P = 28 * D; g.fillStyle = PIN; g.beginPath(); g.roundRect ? g.roundRect(ox, y - 2 * D, P, P, [P / 2, P / 2, P / 2, 2 * D]) : g.rect(ox, y - 2 * D, P, P); g.fill();
+    g.fillStyle = '#ffffff'; g.font = F(700, 13); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(c.n), ox + P / 2, y - 2 * D + P / 2 + D);
+    g.textAlign = 'left'; g.textBaseline = 'top';
+    for (const it of items) {
+      g.font = it.font;
+      if (it.key) { g.fillStyle = '#666666'; g.fillText(it.key, ox, y + 4 * D); }
+      g.fillStyle = it.color;
+      it.lines.forEach((ln, i) => g.fillText(ln, ox + it.x, y + i * it.lh + 4 * D));
+      y += it.lines.length * it.lh + it.after;
+    }
+    return cv;
+  }
+  const download = (blob, name) => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  // how: 'copy' puts a PNG on the clipboard (browsers only accept PNG there); 'save' downloads a JPG
+  async function shareComment(c, how) {
+    let why = null, noShot = false;
+    const make = type => (async () => {
+      let shot = null;
+      try { shot = await captureFrame(); } catch (e) { why = e; if (e.wrongSurface || e.name === 'NotAllowedError' || e.name === 'AbortError') throw e; }
+      noShot = !shot;
+      const cv = feedbackImage(c, shot);
+      return new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('Could not encode the image')), type, 0.92));
+    })();
+    const fail = e => toast(e?.wrongSurface ? 'Choose “This tab” when asked, so the picture shows the page.' : ['NotAllowedError', 'AbortError'].includes(e?.name) ? 'Not copied: the screenshot needs permission to capture this tab.' : 'Could not make the image. Try again.');
+    const btn = $('[data-v=claude]', root); if (btn) btn.disabled = true;
+    try {
+      if (how === 'copy' && navigator.clipboard?.write && window.ClipboardItem) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({'image/png': make('image/png')})]);
+          return toast(`Copied comment #${c.n}${noShot ? ' (text only)' : ''}. Paste it into Claude.`);
+        } catch (e) { if (why?.wrongSurface || ['NotAllowedError', 'AbortError'].includes(why?.name)) return fail(why); }
+        // the clipboard refused (for example the page lost focus while the browser asked for permission): save instead
+      }
+      const name = `comment-${c.n}.jpg`;
+      download(await make('image/jpeg'), name);
+      toast(`Saved ${name}${how === 'copy' ? ' (the clipboard was not available)' : ''}. Drag it into Claude.`);
+    } catch (e) { fail(why || e); }
+    finally { if (btn?.isConnected) btn.disabled = false; }
+  }
+  RC.feedbackImage = (c, shot) => feedbackImage(c, shot || null);
+  addEventListener('pagehide', stopCapture);
+  function closeViewer() { stopCapture(); $('.rc-viewer', root)?.remove(); viewing = null; fab.hidden = false; load(); }
   addEventListener('resize', () => $('.rc-viewer', root)?._fit?.());
   addEventListener('message', e => { if (e.origin === location.origin && e.data?.rc === 'ready') { const l = $('.rc-load', root); if (l) { l.style.opacity = 0; setTimeout(() => l.remove(), 260); } } });
   root.addEventListener('click', async e => {
@@ -521,6 +666,7 @@
     if (a === 'close') return closeViewer();
     if (a === 'prev' && order[i - 1]) return openViewer(order[i - 1].id);
     if (a === 'next' && order[i + 1]) return openViewer(order[i + 1].id);
+    if (a === 'claude' || a === 'save') return shareComment(c, a === 'claude' ? 'copy' : 'save');
     try {
       if (a === 'resolve') { await api('/' + encodeURIComponent(c.id), {method: 'PATCH', body: JSON.stringify({resolved: !c.resolved})}); await load(); return openViewer(c.id); }
       if (a === 'delete') return askDelete(c);
@@ -531,6 +677,8 @@
     if (e.key === 'Escape') { e.stopPropagation(); closeViewer(); }
     if (e.key === 'ArrowLeft') { e.stopPropagation(); $('[data-v=prev]', root)?.click(); }
     if (e.key === 'ArrowRight') { e.stopPropagation(); $('[data-v=next]', root)?.click(); }
+    // C, or Cmd/Ctrl+C when no text is selected: Copy for Claude
+    if ((e.key === 'c' || e.key === 'C') && !e.altKey && (!(e.metaKey || e.ctrlKey) || getSelection().isCollapsed)) { e.preventDefault(); e.stopPropagation(); $('[data-v=claude]', root)?.click(); }
   }, true);
 
   load();

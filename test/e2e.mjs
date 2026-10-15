@@ -16,7 +16,8 @@ let failed = 0;
 const check = (ok, what, extra = '') => { console.log((ok ? '  ok   ' : '  FAIL ') + what + (extra ? '  ' + extra : '')); if (!ok) failed++; };
 const CHROME = process.env.CHROME || {darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', linux: '/usr/bin/google-chrome', win32: 'C:/Program Files/Google/Chrome/Application/chrome.exe'}[process.platform];
 await w(700);
-const b = await puppeteer.launch({executablePath: CHROME, headless: 'new', args: ['--hide-scrollbars']});
+// --auto-accept-this-tab-capture answers the "capture this tab?" prompt used by Copy for Claude; CHROME_ARGS adds more (e.g. --no-sandbox as root)
+const b = await puppeteer.launch({executablePath: CHROME, headless: 'new', args: ['--hide-scrollbars', '--auto-accept-this-tab-capture', ...(process.env.CHROME_ARGS || '').split(' ').filter(Boolean)]});
 try {
   const p = await b.newPage(); const errs = []; p.on('pageerror', e => errs.push(String(e)));
   await p.setViewport({width: 1280, height: 800});
@@ -24,7 +25,7 @@ try {
 
   console.log('widget and API');
   const js = await fetch(B + '/__rc/rc.js'); check(js.ok && (await js.text()).includes('ReviewComments'), 'serves /__rc/rc.js');
-  check((await j('/__rc/version')).body?.version === '1.0.1', 'reports its version');
+  check((await j('/__rc/version')).body?.version === '1.1.0', 'reports its version');
   check((await j('/__rc/api/comments', {method: 'POST', body: '{}'})).status === 400, 'rejects an empty comment');
 
   console.log('add a comment through the UI (page with no adapter)');
@@ -73,15 +74,52 @@ try {
   await p.goto(B + '/app?rc_replay=' + ac.id, {waitUntil: 'load'}); await w(1000);
   check(await p.evaluate(() => document.querySelector('#drawer').classList.contains('on') && document.querySelector('[data-tab=two]').getAttribute('aria-selected') === 'true'), 'adapter restore reopens the drawer on tab two');
 
+  check(!errs.length, 'no page errors', errs.join(' | '));
+
+  // Last browser step on purpose: headless Chromium crashes when a tab that is capturing itself stops capturing
+  // (closing the viewer, or navigating). Real Chrome does not.
+  console.log('copy for Claude');
+  await p.goto(B + '/', {waitUntil: 'load'}); await w(300);
+  await p.click('#rc-fab'); await w(400);
+  await p.click('.rc-item'); await w(1500);
+  await b.defaultBrowserContext().overridePermissions(B, ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write']);
+  await p.bringToFront();
+  await p.click('[data-v=claude]'); await w(3000);
+  const toastText = await p.evaluate(() => document.querySelector('.rc-toast')?.textContent || '');
+  check(/^Copied comment #1\. Paste it into Claude\.$/.test(toastText), 'copies with a screenshot', toastText);
+  const clip = await p.evaluate(async () => {
+    const it = (await navigator.clipboard.read()).find(i => i.types.includes('image/png'));
+    if (!it) return null;
+    const bmp = await createImageBitmap(await it.getType('image/png'));
+    const cv = new OffscreenCanvas(bmp.width, bmp.height), g = cv.getContext('2d'); g.drawImage(bmp, 0, 0);
+    // the screenshot is the top part of the image; the replayed marker (#e8590c) must be in it
+    const d = g.getImageData(0, 0, bmp.width, Math.floor(bmp.height * 0.45)).data; let pin = 0;
+    for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 232) < 24 && Math.abs(d[i + 1] - 89) < 30 && d[i + 2] < 60) pin++;
+    const png = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); it.getType('image/png').then(bl => fr.readAsDataURL(bl)); });
+    return {w: bmp.width, h: bmp.height, pin, png};
+  });
+  if (process.env.RC_SAVE_CLIP && clip) { (await import('fs')).writeFileSync(process.env.RC_SAVE_CLIP, Buffer.from(clip.png.split(',')[1], 'base64')); }
+  if (clip) delete clip.png;
+  check(clip && clip.w >= 1440 && clip.h > clip.w * 0.6, 'clipboard holds one image of the page and the comment', JSON.stringify(clip));
+  check(clip && clip.pin > 100, 'the screenshot shows the replayed marker', JSON.stringify(clip));
+  const dl = await p.evaluate(async () => {
+    const c = (await (await fetch('/__rc/api/comments?page=home')).json())[0];
+    const cv = window.ReviewComments.feedbackImage(c);              // no screenshot: text card only
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.9));
+    return {type: blob.type, w: cv.width, h: cv.height};
+  });
+  check(dl.type === 'image/jpeg' && dl.w > 0 && dl.h > 200, 'the same card encodes as a JPG', JSON.stringify(dl));
+  check(await p.evaluate(() => !document.querySelector('.rc-capturing') && document.querySelector('.rc-vside')?.offsetWidth > 0), 'viewer is back to normal after the capture');
+  check(!errs.length, 'no page errors while copying', errs.join(' | '));
+
   console.log('reply, resolve, delete');
   check((await j(`/__rc/api/comments/${c.id}/replies`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({author: 'A', text: 'agreed'})})).body?.replies?.length === 1, 'reply added');
   check((await j(`/__rc/api/comments/${c.id}`, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({resolved: true})})).body?.resolved === true, 'resolved');
   check((await j(`/__rc/api/comments/${c.id}`, {method: 'DELETE', headers: {'X-Delete-Password': 'nope'}})).status === 403, 'wrong delete password refused');
   check((await j(`/__rc/api/comments/${c.id}`, {method: 'DELETE', headers: {'X-Delete-Password': 'secret'}})).status === 200, 'right delete password works');
 
-  check(!errs.length, 'no page errors', errs.join(' | '));
 } finally {
-  await b.close(); srv.kill(); rmSync(data, {recursive: true, force: true});
+  await b.close().catch(() => {}); srv.kill(); rmSync(data, {recursive: true, force: true});
 }
 console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed');
 process.exit(failed ? 1 : 0);

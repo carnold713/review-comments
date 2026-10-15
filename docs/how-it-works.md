@@ -79,6 +79,14 @@ The widget adds `url`, `vw` (layout width without the scrollbar, `document.docum
 - Inside the iframe, `rc.js` sees `rc_replay` and switches to **replay mode**: it hides the page scrollbar (so the layout width matches), loads the comment, awaits the adapter's `restore(snap)` (or the built-in one), draws the marker, and posts `{rc:'ready'}` to the parent, which fades out the "Restoring their view…" cover.
 - Replay mode does not build any of the comment UI, so the replayed page is clean.
 
+### 4b Copy for Claude
+One image per comment, made to be pasted into Claude: the screenshot of the replay, then the comment and its details.
+- **The screenshot.** A page cannot read its own pixels, and redrawing the DOM (html2canvas and the like) gets fonts, images and canvases wrong. So the widget asks for a capture of the current tab with `getDisplayMedia({preferCurrentTab: true})`, called inside the click so it counts as a user action. The stream is kept while the viewer is open (only the first copy asks) and stopped when the viewer closes or the page unloads.
+- **Getting a sharp picture.** While capturing, the viewer briefly hides its toolbar and side panel (`.rc-capturing`) and fits the replay to the whole window, waits for a new video frame, crops the frame's rectangle out of the video (`videoWidth / innerWidth` gives the device-pixel scale), then puts the viewer back. If the video does not have this viewport's shape, a different tab or window was picked: the capture is stopped and the person is asked to choose "This tab".
+- **The image.** A canvas at 2×: the screenshot (at most 1600 × 1400) on top, or on the left when it is taller than wide (phones), and the text beside or below it: comment number on a marker like the page's, the comment, page, full address, screen, what was showing, what was clicked or the marked area, adapter detail rows, author and time, status, replies.
+- **Clipboard.** `navigator.clipboard.write([new ClipboardItem({'image/png': promise})])`, again inside the click (Safari needs that; passing a promise lets the capture finish later). Browsers only accept PNG images on the clipboard. If the write fails (for example the page lost focus while the browser asked for permission), the image is downloaded as `comment-<n>.jpg` instead. **Save as JPG** always downloads.
+- **Testing.** `--auto-accept-this-tab-capture` answers the prompt in headless Chrome. Headless Chromium crashes when a tab that captures itself stops capturing (closing the viewer, navigating), so the e2e test copies as its last browser step.
+
 ### 5 Keeping the marker on the content
 Stored coordinates are viewport pixels at the moment of the comment. To make the marker follow the content while the reviewer scrolls the replay:
 
