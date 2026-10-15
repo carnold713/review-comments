@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Review Comments · example</title>
+<style>
+  body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#222;background:#fafafa}
+  main{max-width:960px;margin:0 auto;padding:48px 24px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
+  .card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.1);height:140px}
+  .panel{height:220px;overflow:auto;background:#fff;border:1px solid #ddd;border-radius:8px;padding:0 16px}
+  .panel p{margin:16px 0}
+  details{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin:16px 0}
+  .sticky-foot{position:fixed;right:0;bottom:0;left:0;padding:12px 24px;background:#fff;border-top:1px solid #ddd;text-align:right}
+  .sticky-foot button{padding:10px 20px;border-radius:20px;border:0;background:#222;color:#fff}
+</style>
+</head>
+<body>
+<main>
+  <h1>Review Comments example</h1>
+  <p>Click the round button in the corner, then “Add a comment”. Click a spot or drag an area. Scroll this page, the panel below and open the details first: the comment remembers all of it.</p>
+  <h2>Cards</h2>
+  <div class="grid" id="cards"></div>
+  <h2>A scrolling panel</h2>
+  <div class="panel" id="panel"></div>
+  <details id="more"><summary>More details</summary><p>Hidden until opened. Comments made with this open replay with it open.</p></details>
+  <h2>More cards</h2>
+  <div class="grid" id="cards2"></div>
+</main>
+<!-- data-rc-avoid keeps the comment button clear of this bar -->
+<div class="sticky-foot" data-rc-avoid><button type="button">Sticky action</button></div>
+<script>
+  const card = i => `<div class="card" data-rc-label="Card ${i}"><b>Card ${i}</b><p>Some text for card ${i}.</p></div>`;
+  document.getElementById('cards').innerHTML = Array.from({length: 12}, (_, i) => card(i + 1)).join('');
+  document.getElementById('cards2').innerHTML = Array.from({length: 12}, (_, i) => card(i + 13)).join('');
+  document.getElementById('panel').innerHTML = Array.from({length: 30}, (_, i) => `<p>Panel line ${i + 1}</p>`).join('');
+</script>
+</body>
+</html>

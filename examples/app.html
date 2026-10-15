@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Review Comments · app example</title>
+<style>
+  body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#222}
+  main{max-width:720px;margin:0 auto;padding:48px 24px}
+  .tabs button{padding:8px 16px;border:1px solid #ccc;background:#fff;border-radius:16px;margin-right:8px}
+  .tabs button[aria-selected=true]{background:#222;color:#fff;border-color:#222}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:320px;background:#fff;box-shadow:-8px 0 24px rgba(0,0,0,.15);padding:24px;transform:translateX(100%);transition:transform .3s}
+  .drawer.on{transform:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>App example</h1>
+  <p>This page keeps its state in JavaScript, so it gives Review Comments an adapter to save and restore it.</p>
+  <div class="tabs"><button data-tab="one">One</button><button data-tab="two">Two</button><button data-tab="three">Three</button></div>
+  <h2 id="tab-title"></h2>
+  <p><button id="open-drawer">Open drawer</button></p>
+</main>
+<aside class="drawer" id="drawer" aria-label="Drawer"><h2>Drawer</h2><p>Open state is part of the snapshot.</p><button id="close-drawer">Close</button></aside>
+<script>
+  const state = {tab: 'one', drawer: false};
+  function render() {
+    document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === state.tab));
+    document.getElementById('tab-title').textContent = 'Tab ' + state.tab;
+    document.getElementById('drawer').classList.toggle('on', state.drawer);
+  }
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-tab]'); if (t) { state.tab = t.dataset.tab; render(); }
+    if (e.target.id === 'open-drawer') { state.drawer = true; render(); }
+    if (e.target.id === 'close-drawer') { state.drawer = false; render(); }
+  });
+  render();
+
+  // Tell Review Comments how to save and restore this page. Set it before or after the widget loads.
+  window.__rcAdapter = {
+    snapshot: () => ({tab: state.tab, drawer: state.drawer, scrollY: Math.round(scrollY),
+      context: state.drawer ? 'Drawer open' : 'Tab ' + state.tab}),
+    restore: async s => {
+      state.tab = s.tab || 'one'; state.drawer = !!s.drawer; render();
+      scrollTo(0, s.scrollY || 0);
+      await new Promise(r => setTimeout(r, 350));      // let the drawer finish sliding in
+    },
+    details: s => [['Tab', s.tab]],
+  };
+</script>
+</body>
+</html>

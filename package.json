@@ -1,0 +1,15 @@
+{
+  "name": "review-comments",
+  "version": "1.0.0",
+  "description": "Comment on live sites and replay exactly what the commenter saw: screen size, scroll, open panels and app state. Drop into any Node server.",
+  "main": "index.js",
+  "files": ["index.js", "server/", "client/", "README.md", "docs/", "LICENSE"],
+  "scripts": {
+    "start": "node examples/server.js",
+    "test": "node test/e2e.mjs"
+  },
+  "engines": { "node": ">=18" },
+  "repository": { "type": "git", "url": "https://github.com/carnold713/review-comments.git" },
+  "license": "MIT",
+  "devDependencies": { "puppeteer-core": "^24.0.0" }
+}
